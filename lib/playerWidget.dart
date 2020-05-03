@@ -1,12 +1,16 @@
-import 'package:idiomi/playlist.dart';
+
+import 'dart:developer';
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 
 import 'package:audio_service/audio_service.dart';
+import 'package:just_audio/just_audio.dart';
 
 import 'package:rxdart/rxdart.dart';
 
-import 'audioPlayer.dart';
-import 'playerPositionIndicator.dart';
+//import 'playerPositionIndicator.dart';
+import 'player.dart';
 
 class ScreenState {
   final List<MediaItem> queue;
@@ -22,141 +26,176 @@ class PlayerControlsWidget extends StatefulWidget {
 }
 
 class _PlayerControlsState extends State<PlayerControlsWidget> {
+  final playerButtonIconsSize = 32.0;
+
+  /// Tracks the position while the user drags the seek bar.
+  final BehaviorSubject<double> _dragPositionSubject =
+      BehaviorSubject.seeded(null);
+
   @override
   Widget build(BuildContext context) {
     return Container(
-        child: StreamBuilder<ScreenState>(
-      stream: Rx.combineLatest3<List<MediaItem>, MediaItem, PlaybackState,
-              ScreenState>(
-          AudioService.queueStream,
-          AudioService.currentMediaItemStream,
-          AudioService.playbackStateStream,
-          (queue, mediaItem, playbackState) =>
-              ScreenState(queue, mediaItem, playbackState)),
-      builder: (context, snapshot) {
-        final screenState = snapshot.data;
-        final queue = screenState?.queue;
-        final mediaItem = screenState?.mediaItem;
-        final state = screenState?.playbackState;
-        final basicState = state?.basicState ?? BasicPlaybackState.none;
-        return Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            if (queue != null && queue.isNotEmpty)
-              Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  IconButton(
-                    icon: Icon(Icons.skip_previous),
-                    iconSize: 64.0,
-                    onPressed: mediaItem == queue.first
-                        ? null
-                        : AudioService.skipToPrevious,
-                  ),
-                  IconButton(
-                    icon: Icon(Icons.skip_next),
-                    iconSize: 64.0,
-                    onPressed: mediaItem == queue.last
-                        ? null
-                        : AudioService.skipToNext,
-                  ),
-                ],
-              ),
-            if (mediaItem?.title != null) Text(mediaItem.title),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                if (basicState == BasicPlaybackState.playing)
-                  pauseButton()
-                else if (basicState == BasicPlaybackState.paused)
-                  playButton()
-                else if (basicState == BasicPlaybackState.buffering ||
-                    basicState == BasicPlaybackState.skippingToNext ||
-                    basicState == BasicPlaybackState.skippingToPrevious)
-                  Padding(
-                    padding: const EdgeInsets.all(8.0),
-                    child: SizedBox(
-                      width: 64.0,
-                      height: 64.0,
-                      child: CircularProgressIndicator(),
-                    ),
-                  ),
-                stopButton(),
-              ],
-            ),
-            if (basicState != BasicPlaybackState.none &&
-                basicState != BasicPlaybackState.stopped) ...[
-              PlayerPositionIndicator(mediaItem, state),
-              Text("State: " + "$basicState".replaceAll(RegExp(r'^.*\.'), '')),
-            ]
-          ],
-        );
-      },
-    ));
+        child: StreamBuilder<BasicPlaybackState>(
+          stream: Player.basicPlaybackStateStream,
+          builder: playerControlsStreamBuilder
+        )
+    );
   }
 
-  void startPlayer() {
-    startButton(
-      'AudioPlayer',
-      () {
-        AudioService.start(
-          backgroundTaskEntrypoint: _audioPlayerTaskEntrypoint,
-          androidNotificationChannelName: 'Audio Service Demo',
-          notificationColor: 0xFF2196f3,
-          androidNotificationIcon: 'mipmap/ic_launcher',
-          enableQueue: true,
+  Row controlsRowWidget(final BasicPlaybackState basicPlaybackState) {
+    return Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            StreamBuilder<bool>(
+              stream: Player.isFirstMediaItem,
+              builder: (_, snap) => IconButton(
+                padding: const EdgeInsets.all(4.0),
+                icon: Icon(Icons.skip_previous),
+                iconSize: playerButtonIconsSize,
+                onPressed:
+                    (snap == null || snap.data == null || snap.data)
+                        ? null
+                        : AudioService.skipToPrevious,
+              ),
+            ),
+
+            if (basicPlaybackState == BasicPlaybackState.playing)
+              pauseButton()
+            else
+              playButton(basicPlaybackState),
+
+            StreamBuilder<bool>(
+              stream: Player.isLastMediaItem,
+              builder: (_, snap) => IconButton(
+                padding: const EdgeInsets.all(4.0),
+                icon: Icon(Icons.skip_next),
+                iconSize: playerButtonIconsSize,
+                onPressed:
+                    (snap == null || snap.data == null || snap.data)
+                        ? null
+                        : Player.skipToNext,
+              ),
+            ),
+          ],
+        );
+  }
+
+
+  Row playPauseRowWidget(final BasicPlaybackState basicPlaybackState) {
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.center,
+      children: [
+        if (basicPlaybackState == BasicPlaybackState.playing)
+          pauseButton()
+        else if (basicPlaybackState == BasicPlaybackState.paused)
+          playButton(basicPlaybackState)
+        else if (basicPlaybackState == BasicPlaybackState.buffering ||
+            basicPlaybackState == BasicPlaybackState.skippingToNext ||
+            basicPlaybackState == BasicPlaybackState.skippingToPrevious)
+          Padding(
+            padding: const EdgeInsets.all(8.0),
+            child: SizedBox(
+              width: playerButtonIconsSize,
+              height: playerButtonIconsSize,
+              child: CircularProgressIndicator(),
+            ),
+          ),
+      ],
+    );
+  }
+
+  StreamBuilder<PositionIndicator> positionIndicatorBuilder() {
+    return StreamBuilder<PositionIndicator>(
+      stream: Player.positionIndicator,
+      initialData: PositionIndicator(position: 0, duration: 0),
+      builder: (_, snap) {
+        log('Playback state updated');
+        double _seekPos;
+        return StreamBuilder(
+          stream: Rx.combineLatest2<double, double, double>(
+              _dragPositionSubject.stream,
+              Stream.periodic(Duration(milliseconds: 1000)),
+              (dragPosition, _) => dragPosition),
+          builder: (context, snapshot) {
+            double position = AudioService.playbackState?.currentPosition?.toDouble();
+            position ??= 0.0;
+                //snapshot.data ?? snap.data?.position?.toDouble();
+
+            double duration = snap.data?.duration?.toDouble();
+            final playbackTimestamp = position ?? 0.0;
+            final playbackTimestampStr = "${(playbackTimestamp / 1000).toStringAsFixed(2)}";
+            return Column(
+              children: [
+                if (duration != null)
+                  Slider(
+                    min: 0.0,
+                    max: duration,
+                    value: _seekPos ??
+                        math.max(0.0, math.min(position, duration)),
+                    onChanged: (value) {
+                      _dragPositionSubject.add(value);
+                    },
+                    onChangeEnd: (value) {
+                      AudioService.seekTo(value.toInt());
+                      _seekPos = value;
+                      _dragPositionSubject.add(null);
+                    },
+                  ),
+                Text(playbackTimestampStr),
+              ],
+            );
+          },
         );
       },
     );
   }
 
-  RaisedButton startButton(String label, VoidCallback onPressed) =>
-      RaisedButton(
-        child: Text(label),
-        onPressed: onPressed,
-      );
+  Widget playerControlsStreamBuilder(BuildContext context, AsyncSnapshot<BasicPlaybackState> snapshot) {
+    final basicPlaybackState = snapshot.data;
+    return Column(
+      mainAxisAlignment: MainAxisAlignment.center,
+      children: [
+        /*if (basicPlaybackState == null || basicPlaybackState == BasicPlaybackState.none) ... [
+          Placeholder()
+        ] else ... [*/
+        controlsRowWidget(basicPlaybackState),
+        //playPauseRowWidget(basicPlaybackState),
+        if (basicPlaybackState != BasicPlaybackState.stopped)
+          positionIndicatorBuilder()
+      ],
+      //]
+    );
+  }
 
-  IconButton playButton() => IconButton(
-        icon: Icon(Icons.play_arrow),
-        iconSize: 64.0,
-        onPressed: AudioService.play,
-      );
+  IconButton playButton(BasicPlaybackState basicPlaybackState) => IconButton(
+    icon: Icon(Icons.play_arrow),
+    iconSize: playerButtonIconsSize,
+    onPressed: () => playHandler(basicPlaybackState),
+  );
+  
+  void playHandler(BasicPlaybackState basicPlaybackState) {
+    log('playback state in play button: ${basicPlaybackState.toString()}');
+    if (basicPlaybackState == null || basicPlaybackState == BasicPlaybackState.none ) {
+      log('Null handling');
+      Player.start();
+    }
+    else {
+      log('let\'s play');
+      AudioService.play();
+    }
+  }
 
   IconButton pauseButton() => IconButton(
-        icon: Icon(Icons.pause),
-        iconSize: 64.0,
-        onPressed: AudioService.pause,
-      );
+    icon: Icon(Icons.pause),
+    iconSize: playerButtonIconsSize,
+    onPressed: AudioService.pause,
+  );
 
   IconButton stopButton() => IconButton(
-        icon: Icon(Icons.stop),
-        iconSize: 64.0,
-        onPressed: AudioService.stop,
-      );
+    padding: const EdgeInsets.all(4.0),
+    icon: Icon(Icons.stop),
+    iconSize: playerButtonIconsSize,
+    onPressed: AudioService.stop,
+  );
 }
 
-void _audioPlayerTaskEntrypoint() async {
-  final _queue = <MediaItem>[
-    MediaItem(
-      id: "https://s3.amazonaws.com/scifri-episodes/scifri20181123-episode.mp3",
-      album: "Science Friday",
-      title: "A Salute To Head-Scratching Science",
-      artist: "Science Friday and WNYC Studios",
-      duration: 5739820,
-      artUri:
-          "https://media.wnyc.org/i/1400/1400/l/80/1/ScienceFriday_WNYCStudios_1400.jpg",
-    ),
-    MediaItem(
-      id: "https://s3.amazonaws.com/scifri-segments/scifri201711241.mp3",
-      album: "Science Friday",
-      title: "From Cat Rheology To Operatic Incompetence",
-      artist: "Science Friday and WNYC Studios",
-      duration: 2856950,
-      artUri:
-          "https://media.wnyc.org/i/1400/1400/l/80/1/ScienceFriday_WNYCStudios_1400.jpg",
-    ),
-  ];
-
-  final englishToSpanishPlaylist = PlayList('english-spanish', _queue);
-  AudioServiceBackground.run(() => AudioPlayerTask(englishToSpanishPlaylist));
-}

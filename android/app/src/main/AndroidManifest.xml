@@ -15,7 +15,7 @@
          additional functionality it is fine to subclass or reimplement
          FlutterApplication and put your custom class here. -->
     <application
-        android:label="Audio Service Demo"
+        android:label="Idiomi"
         android:icon="@mipmap/ic_launcher">
         <activity
             android:name=".MainActivity"
@@ -30,7 +30,7 @@
             </intent-filter>
         </activity>
 
-        <service android:name="com.mansoor.audioservice.AudioService">
+        <service android:name="com.ryanheise.audioservice.AudioService">
             <intent-filter>
                 <action android:name="android.media.browse.MediaBrowserService" />
             </intent-filter>

@@ -1,83 +1,64 @@
-import 'dart:developer';
-
 import 'package:flutter/material.dart';
-import 'dart:async';
 
-import 'package:audio_service/audio_service.dart';
-
+import 'course.dart';
+import '../player.dart';
 
 class HomePage extends StatefulWidget {
   @override
   _HomePageState createState() => new _HomePageState();
 }
 
-class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
-
-  @override
-  void initState() {
-    super.initState();
-    WidgetsBinding.instance.addObserver(this);
-    connect();
-  }
-
-  @override
-  void dispose() {
-    disconnect();
-    WidgetsBinding.instance.removeObserver(this);
-    super.dispose();
-  }
-
-  @override
-  void didChangeAppLifecycleState(AppLifecycleState state) {
-    switch (state) {
-      case AppLifecycleState.resumed:
-        connect();
-        log('connected');
-        break;
-      case AppLifecycleState.paused:
-        log('disconnected');
-        disconnect();
-        break;
-      default:
-        break;
-    }
-  }
-
-  void connect() async {
-    await AudioService.connect();
-  }
-
-  void disconnect() {
-    AudioService.disconnect();
-  }
-
+class _HomePageState extends State<HomePage> {
   @override
   Widget build(BuildContext context) {
-    return new WillPopScope(
-        onWillPop: () {
-          disconnect();
-          return Future.value(true);
-        },
-        child: new Scaffold(
-          appBar: new AppBar(
-            title: const Text('Idiomi'),
-          ),
-          body: new Center(
-            child: Container(
-              child: audioPlayerButton(),
-            ),
-          ),
+    return new Scaffold(
+        appBar: new AppBar(
+          title: const Text('Idiomi'),
+        ),
+        body: new Center(
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: <Widget>[
+              Expanded(flex: 2,
+                child: Placeholder(
+
+                ),
+              ),
+              SizedBox(height: 20),
+              Container(
+                height: 100,
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: <Widget>[
+                    audioPlayerButton()
+                  ],
+                ),
+              ),
+            ]
+          )
         ),
       );
   }
 
-  RaisedButton audioPlayerButton() {
-    //start audio player widget here
-    return RaisedButton(onPressed: audioPlayerPressed, child: const Text("Get the show started!"),);
-  }
-  void audioPlayerPressed() {
-    log('In audio button press!');
-    Navigator.pushNamed(context, '/courses');
+  MaterialButton audioPlayerButton() => MaterialButton(
+    color: Theme.of(context).primaryColor,
+    textColor: Colors.white,
+    onPressed: audioPlayerPressed, 
+    child: Text(
+      "Go to Lessons",
+      style: new TextStyle(
+        fontSize: 20.0,
+      ),
+      
+      ),
+    );
+
+
+  void audioPlayerPressed() async {
+    Navigator.pushNamed(context, '/course', arguments: CourseArguments("f34232432", "Complete Spanish"));
+    //Navigator.pushNamed(context, '/courses');
+
+
   }
 
 }
